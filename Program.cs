@@ -467,7 +467,7 @@ namespace MidiVisualizer
                 drawGuideline(graphics, lineStratX, canvasHeight);
                 framesQueue.Enqueue(new GeneratedFrame(frame, bitmap));
                 Console.SetCursorPosition(0, Console.CursorTop);
-                Console.Write($"生成帧 {frame + 1}/{totalFrames + 1 + extraFrames}        ");//空格保证覆盖之前的输出
+                Console.Write($"生成帧 {frame + 1}/{totalFrames + 1 + extraFrames+ 0.5 * fps}        ");//空格保证覆盖之前的输出
             }
             generationRunning = false;
             saveFramesThread.Join();
