@@ -223,7 +223,7 @@ namespace MidiVisualizer
         {
             Console.WriteLine
                 (
-                "===Midi可视化V1.0.0===\n" +
+                "===Midi可视化V1.1.0===\n" +
                 "欢迎使用本工具\n" +
                 "请按 Enter 键接受默认值,或输入新值\n" +
                 "请注意音符宽度和画布纵向大小的关系,可能出现纵向无法容纳全部音符的情况\n" +
