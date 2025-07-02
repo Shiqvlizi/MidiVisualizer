@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Runtime.Versioning;
 namespace MidiVisualizer
 {
@@ -13,17 +14,92 @@ namespace MidiVisualizer
     {
         private static int DefaultCanvasWidth = 1920;
         private static int DefaultCanvasHeight = 1080;
-        private static int DefaultGuideLineX = 100;
-        private static int DefaultNoteDisplayHeight = 15;
-        private static double DefaultPixelsPerSecond = 1500;//192.0是原来的默认值
+        private static int DefaultGuideLineX = 960;
+        private static int DefaultNoteDisplayHeight = 10;
+        private static int DefaultNoteDistance = 0;
+        private static double DefaultRotationAngle = 0;// 默认旋转角度,单位度
+        private static double DefaultRotationManner = 0; // 默认旋转方式,0:动态调整,音符越长,角度越小 1:固定角度
+        private static double DefaultShakeAmplitude = 10; // 默认抖动幅度
+        private static double DefaultShakeAmplitudeVariance = 0.0005; // 抖动幅度的方差
+        public static double DefaultShakeActivation = 0;//音符第一次被激活时抖动幅度的百分比 
+        public static int DefaultShakeManner = 0;//第一次抖动的方式
+        private static double DefaultReturnToCenterTime = 0.5; // 回正时间,单位秒
+        private static double DefaultPixelsPerSecond = 1500;//192.0是原来的默认值,1tick=1像素默认bpm
         private static int DefaultFps = 30;
-        private static string DefaultMidiFilePath = "test.mid"; // 默认MIDI文件路径
+        private static string DefaultMidiFilePath = "testttt.mid"; // 默认MIDI文件路径
         private static Color DefaultActiveNoteColor = Color.White; // 默认活跃音符颜色
         private static Color DefaultInactiveNoteColor = Color.FromArgb(100, 100, 100); // 默认非活跃音符颜色
         private static Color DefaultBackgroundColor = Color.Black; // 默认背景色
         private static Color DefaultGuidelineColor = Color.White; // 默认引导线颜色
         private static int DefaultGuidelineWidth = 1; // 默认判定线宽度
-        static void ParseMidiFile(string filePath, List<Note> notes)
+
+        private static double EaseOutCubic(double t)//缓动函数
+        {
+            if (t < 0 || t > 1)
+            {
+                return 0;
+            }
+            return Math.Pow(1 - t, 3);
+        }
+        // 其他的缓动函数：
+        // EaseOutQuad (二次方缓出): return 1 - (1 - t) * (1 - t);
+        // EaseOutExpo (指数缓出): return (t == 1.0) ? 1.0 : 1 - Math.Pow(2, -10 * t);
+
+        public static double UniformRandom(double range)//均匀随机数
+        {
+            return (_random.NextDouble() * 2 - 1) * range;
+        }
+
+        public static double UniformRandomExcludeMiddle(double a, double b)//均匀随机数,排除中间部分,取值(-a,-b)∪(b,a)
+        {
+
+            //确保都是正数
+            a = Math.Abs(a);
+            b = Math.Abs(b);
+            //确保 a > b，如果不满足就交换
+            if (a <= b)
+            {
+                double temp = a;
+                a = b;
+                b = temp;
+            }
+            double random = _random.NextDouble();
+
+            if (random < 0.5) // 50% 概率选择左区间 (-a, -b)
+            {
+                return -a + random * 2 * (a - b);
+            }
+            else // 50% 概率选择右区间 (b, a)
+            {
+                return b + (random - 0.5) * 2 * (a - b);
+            }
+        }
+
+        private static Random _random = new Random();//正态分布概率分布的随机数
+        public static double NormalRandom(double maxAmplitude, double variance)
+        {
+            double standardDeviation = Math.Sqrt(variance);
+
+            // 使用中心极限定理，叠加12个均匀分布近似正态分布
+            double sum = 0;
+            for (int i = 0; i < 12; i++)
+            {
+                sum += _random.NextDouble();
+            }
+
+            // 标准化到均值0，标准差1
+            double standardNormal = sum - 6.0;
+
+            // 调整到指定的标准差
+            double result = standardNormal * standardDeviation;
+
+            // 限制在最大抖动幅度内
+            result = Math.Max(-maxAmplitude, Math.Min(maxAmplitude, result));
+
+            return result;
+        }
+
+        static void ParseMidiFile(string filePath, List<Note> notes)//解析MIDI文件
         {
             var midiFile = new MidiFile(filePath);
             for (int track = 0; track < midiFile.Tracks; track++)
@@ -173,7 +249,15 @@ namespace MidiVisualizer
             int LineEndX = GetIntInput("判定线X坐标(像素)", DefaultGuideLineX);
             int guideLineWidth = GetIntInput("判定线宽度(像素,0表示不渲染,仅视觉)", DefaultGuidelineWidth);
             int noteHeight = GetIntInput("音符宽度(像素)", DefaultNoteDisplayHeight);
-            double pixelsPerSecond = GetDoubleInput("每秒滚动像素", DefaultPixelsPerSecond);
+            int noteDistance = GetIntInput("音符间距(像素)", DefaultNoteDistance);
+            double rotationAngle = -GetDoubleInput("第一次旋转角度", DefaultRotationAngle);
+            double rotationManner = GetDoubleInput("第一次旋转方式(0:动态调整,1:固定角度)", DefaultRotationManner);
+            int ShakeManner = GetIntInput("第一次抖动方式(0:震动,1:单向)", DefaultShakeManner);
+            double returnToCenterTime = GetDoubleInput("回正时间(秒)", DefaultReturnToCenterTime);
+            double shakeAmplitude = GetDoubleInput("抖动幅度(%,相对于音符宽度)", DefaultShakeAmplitude);
+            double shakeAmplitudeVariance = GetDoubleInput("抖动幅度方差", DefaultShakeAmplitudeVariance);
+            double shakeActivation = GetDoubleInput("第一次抖动百分比(%,相对于音符宽度)", DefaultShakeActivation);
+            double pixelsPerSecond = GetDoubleInput("每秒滚动像素/流速", DefaultPixelsPerSecond);
             int fps = GetIntInput("视频帧率(FPS)", DefaultFps);
             Color activeNoteColor = GetColorInput("活跃音符颜色", DefaultActiveNoteColor);
             Color inactiveNoteColor = GetColorInput("非活跃音符颜色", DefaultInactiveNoteColor);
@@ -199,7 +283,7 @@ namespace MidiVisualizer
             List<Note> notes = new List<Note>();
 
 
-            
+
             ParseMidiFile(filePath, notes);
 
             Console.WriteLine($"BPM:{bpm}");
@@ -234,6 +318,15 @@ namespace MidiVisualizer
             string appDirectory = AppContext.BaseDirectory; // 获取程序 .exe 文件所在的目录
             string midiFileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath); // 获取不带扩展名的文件名
             string frameDir = Path.Combine(appDirectory, midiFileNameWithoutExtension + "_frames");
+            int counter = 0;
+            string BaseFrameDir = frameDir;
+            // 循环检测文件夹是否存在，如果存在则在名称后加数字
+            while (Directory.Exists(frameDir))
+            {
+                counter++;
+                // 构建新的文件夹名称，例如 "MySong_frames_1", "MySong_frames_2"
+                frameDir = $"{BaseFrameDir}_{counter}";
+            }
 
             Directory.CreateDirectory(frameDir);
             int minPitch = notes.Min(note => note.Pitch);
@@ -244,7 +337,10 @@ namespace MidiVisualizer
                 notes[i].PixelStartX = (long)(notes[i].Start * pixelsPerTick);
                 notes[i].PixelLength = (long)((notes[i].End - notes[i].Start) * pixelsPerTick);
                 notes[i].PixelEndX = (notes[i].PixelStartX + notes[i].PixelLength);
-                notes[i].PixelY = canvasHeight / 2 + (mid - notes[i].Pitch) * noteHeight - noteHeight / 2;
+                notes[i].PixelY = canvasHeight / 2 + (mid - notes[i].Pitch) * noteHeight - noteHeight / 2;//其实是左上角
+                notes[i].StartFrame = (int)(notes[i].Start * pixelsPerTick / pixelsPerFrame);
+                notes[i].EndFrame = (int)(notes[i].End * pixelsPerTick / pixelsPerFrame);
+                notes[i].UnidirectionalShake = UniformRandomExcludeMiddle(1, 0.7);
             }
 
 
@@ -287,13 +383,17 @@ namespace MidiVisualizer
             });
             saveFramesThread.IsBackground = true;
             saveFramesThread.Start();
-
-            for (int frame = 0; frame <= (int)Math.Ceiling(lastNote.End * 60 * fps / (bpm * midiFile.DeltaTicksPerQuarterNote)) + extraFrames; frame++)
+            double shakePixels = (noteHeight * shakeAmplitude / 100.0);
+            double shakeActivationPixels = (noteHeight * shakeActivation / 100.0);
+            bool IsNoteActive = false;
+            double timeToCenter = returnToCenterTime * fps;
+            for (int frame = 0; frame <= (int)Math.Ceiling(lastNote.End * 60 * fps / (bpm * midiFile.DeltaTicksPerQuarterNote)) + extraFrames +0.5*fps; frame++)
             {
                 offestX = (int)(pixelsPerFrame * frame);
                 var bitmap = new Bitmap(canvasWidth, canvasHeight);
                 using var graphics = Graphics.FromImage(bitmap);
                 graphics.FillRectangle(backgroundBrush, 0, 0, canvasWidth, canvasHeight);
+
 
                 while (framesQueue.Count >= 200)
                 {
@@ -302,20 +402,67 @@ namespace MidiVisualizer
 
                 foreach (var note in notes)
                 {
+
+
+
+
+
+
+                    IsNoteActive = (note.PixelStartX - offestX + LineEndX <= LineEndX) && (LineEndX < note.PixelEndX - offestX + LineEndX);
                     noteScreenStartX = (int)(note.PixelStartX - offestX + LineEndX);
                     noteScreenEndX = (int)(note.PixelEndX - offestX + LineEndX);
+
+
+
+
+
+
+
                     if (noteScreenStartX > canvasWidth || noteScreenEndX < 0)
                     {
                         continue; // 如果音符超出画布范围，则跳过
                     }
+
+                    System.Drawing.Drawing2D.GraphicsState originalState = graphics.Save();
+                    graphics.TranslateTransform(noteScreenStartX, (note.PixelY + noteHeight / 2));
+                    graphics.RotateTransform
+                        (
+                        (float)
+                            (
+                             !IsNoteActive ? 0 :
+                            ShakeManner == 0 ?
+                            EaseOutCubic((frame - note.StartFrame) / timeToCenter) * rotationAngle * UniformRandomExcludeMiddle(1, 0.7) * 50 * noteHeight / note.PixelLength :
+                            EaseOutCubic((frame - note.StartFrame) / timeToCenter) * rotationAngle * UniformRandomExcludeMiddle(1, 0.7)
+                            )
+                        );
+
                     graphics.FillRectangle
                         (
-                        (note.PixelStartX - offestX + LineEndX <= LineEndX) && (LineEndX < note.PixelEndX - offestX + LineEndX) ? activeBrush : inactiveBrush,
-                        note.PixelStartX - offestX + LineEndX,
-                        note.PixelY,
+                        IsNoteActive ? activeBrush : inactiveBrush,
+                        //note.PixelStartX - offestX + LineEndX
+                        0,
+
+                        -noteHeight / 2 +
+                        (mid - note.Pitch) * noteDistance +
+                        (float)(IsNoteActive ? NormalRandom(shakeAmplitude, shakeAmplitudeVariance) : 0) +
+
+                        (float)(!IsNoteActive ? 0 :
+                        (
+                        ((ShakeManner == 0) ?
+                        EaseOutCubic((frame - note.StartFrame) / timeToCenter) * shakeActivationPixels * UniformRandomExcludeMiddle(1, 0.7) :
+                        EaseOutCubic((frame - note.StartFrame) / timeToCenter) * shakeActivationPixels * note.UnidirectionalShake * shakeActivationPixels)
+                        )),
+
                         note.PixelLength,
                         noteHeight
                         );
+                    //画笔  
+                    //音符X
+                    //音符Y
+                    //音符长
+                    //音符宽
+
+                    graphics.Restore(originalState); // 恢复原始状态
                 }
                 drawGuideline(graphics, lineStratX, canvasHeight);
                 framesQueue.Enqueue(new GeneratedFrame(frame, bitmap));
@@ -369,6 +516,9 @@ namespace MidiVisualizer
         public long PixelEndX { get; set; }
         public long PixelLength { get; set; }
         public int PixelY { get; set; }
+        public int StartFrame { get; set; }
+        public int EndFrame { get; set; }
+        public double UnidirectionalShake { get; set; }
         public Note(long start, long end, int pitch, string name)
         {
             Start = start;
